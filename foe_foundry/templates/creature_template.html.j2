@@ -31,7 +31,7 @@ attack_block, benchmark_block
 
     <h3>Actions</h3>
     {{property_block('Multiattack', multiattack)}}
-    {{attack_block(attack.name, attack_text)}}
+    {{attack_block(attack.display_name, attack_text)}}
 
     {{attack_blocks(attacks)}}
 
@@ -43,12 +43,6 @@ attack_block, benchmark_block
 
     {{features_block(reactions, 'Reactions')}}
 
-    {# {% if benchmarks %}
-    {% for benchmark in benchmarks %}
-    <h4>{{benchmark.name}}</h4>
-    {{benchmark_block(benchmark)}}
-    {% endfor %}
-    {% endif %} #}
-
+    {{features_block(legendary_actions, 'Legendary Actions')}}
 
 </stat-block>

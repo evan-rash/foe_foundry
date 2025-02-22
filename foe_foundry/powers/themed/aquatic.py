@@ -9,12 +9,22 @@ from ..power import RIBBON_POWER, Power, PowerType, PowerWithStandardScoring
 
 class _Aquatic(PowerWithStandardScoring):
     def __init__(self):
-        def not_already_special_movement(c: BaseStatblock) -> bool:
-            return not (c.speed.fly or 0) and not (c.speed.climb or 0)
+        def not_already_humanoid_or_special_movement(c: BaseStatblock) -> bool:
+            return (
+                not (c.speed.fly or 0)
+                and not (c.speed.climb or 0)
+                and c.creature_subtype is None
+                and c.creature_class is None
+                and not c.has_unique_movement_manipulation
+            )
 
         score_args = dict(
-            require_types=[CreatureType.Beast, CreatureType.Monstrosity, CreatureType.Humanoid],
-            require_callback=not_already_special_movement,
+            require_types=[
+                CreatureType.Beast,
+                CreatureType.Monstrosity,
+                CreatureType.Humanoid,
+            ],
+            require_callback=not_already_humanoid_or_special_movement,
             bonus_swimming=True,
             score_multiplier=0.5,
         )
@@ -31,7 +41,9 @@ class _Aquatic(PowerWithStandardScoring):
     def modify_stats(self, stats: BaseStatblock) -> BaseStatblock:
         new_speed = stats.speed.copy(swim=stats.speed.walk)
         new_senses = stats.senses.copy(darkvision=60)
-        stats = stats.copy(speed=new_speed, senses=new_senses)
+        stats = stats.copy(
+            speed=new_speed, senses=new_senses, has_unique_movement_manipulation=True
+        )
         return stats
 
     def generate_features(self, stats: BaseStatblock) -> List[Feature]:

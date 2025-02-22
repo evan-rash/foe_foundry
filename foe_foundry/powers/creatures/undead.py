@@ -1,13 +1,10 @@
 from datetime import datetime
-from typing import List, Tuple
-
-from numpy.random import Generator
+from typing import List
 
 from ...creature_types import CreatureType
-from ...damage import DamageType, Fatigue, Frozen
-from ...die import Die, DieFormula
+from ...damage import DamageType, Frozen
+from ...die import Die
 from ...features import ActionType, Feature
-from ...powers.power_type import PowerType
 from ...statblocks import BaseStatblock
 from ...utils import easy_multiple_of_five
 from ..power import MEDIUM_POWER, Power, PowerType, PowerWithStandardScoring
@@ -48,7 +45,7 @@ class _UndeadFortitude(UndeadPower):
         feature = Feature(
             name="Undead Resilience",
             action=ActionType.Reaction,
-            description=f"When damage reduces {stats.selfref} to 0 hit points, it must make a Constitution saving throw with a DC of 2 + the damage taken, \
+            description=f"When damage reduces {stats.selfref} to 0 hit points, it must make a Constitution saving throw with a DC of 5 + the damage taken, \
                 unless the damage is radiant or from a critical hit. On a success, {stats.selfref} instead drops to 1 hit point.",
         )
         return [feature]
@@ -69,10 +66,17 @@ class _StenchOfDeath(UndeadPower):
         return [feature]
 
 
+def not_burning_undead(stats: BaseStatblock) -> bool:
+    return stats.secondary_damage_type != DamageType.Fire
+
+
 class _StygianBurst(UndeadPower):
     def __init__(self):
         super().__init__(
-            name="Stygian Burst", source="Foe Foundry", bonus_damage=DamageType.Cold
+            name="Stygian Burst",
+            source="Foe Foundry",
+            bonus_damage=DamageType.Cold,
+            require_callback=not_burning_undead,
         )
 
     def generate_features(self, stats: BaseStatblock) -> List[Feature]:
@@ -94,17 +98,24 @@ class _StygianBurst(UndeadPower):
 
 class _Frostbite(UndeadPower):
     def __init__(self):
-        super().__init__(name="Frostbite", source="Foe Foundry", bonus_damage=DamageType.Cold)
+        super().__init__(
+            name="Frostbite",
+            source="Foe Foundry",
+            bonus_damage=DamageType.Cold,
+            require_callback=not_burning_undead,
+            require_cr=2,
+        )
 
     def generate_features(self, stats: BaseStatblock) -> List[Feature]:
         dc = stats.difficulty_class
-        dmg = stats.target_value(1.5, force_die=Die.d8)
+        dmg = stats.target_value(1.5 * min(stats.multiattack, 2), force_die=Die.d8)
         frozen = Frozen(dc=dc)
 
         feature = Feature(
             name="Frostbite",
             action=ActionType.Action,
             replaces_multiattack=2,
+            recharge=5,
             description=f"{stats.selfref.capitalize()} causes numbing frost to form on one creature within 60 feet. The target must make a DC {dc} Constitution saving throw. \
                 On a failure, it suffers {dmg.description} cold damage and is {frozen}. On a success, it suffers half damage instead.",
         )
@@ -113,10 +124,14 @@ class _Frostbite(UndeadPower):
 
 class _SoulChill(UndeadPower):
     def __init__(self):
-        super().__init__(name="Soul Chill", source="Foe Foundry")
+        super().__init__(
+            name="Soul Chill",
+            source="Foe Foundry",
+            bonus_damage=DamageType.Cold,
+            require_callback=not_burning_undead,
+        )
 
     def generate_features(self, stats: BaseStatblock) -> List[Feature]:
-        fatigue = Fatigue()
         dc = stats.difficulty_class
         distance = easy_multiple_of_five(stats.cr * 10, min_val=15, max_val=60)
 
@@ -124,14 +139,14 @@ class _SoulChill(UndeadPower):
             name="Soul Chill",
             action=ActionType.Reaction,
             description=f"Whenever a creature within {distance} feet that {stats.selfref} can see fails a saving throw, {stats.selfref} can attempt to leech away a portion of its spirit. \
-                The creature must succeed on a DC {dc} Charisma saving throw. On a failure, it gains one level of {fatigue}.",
+                The creature must succeed on a DC {dc} Charisma saving throw. On a failure, it gains one level of **Exhaustion**.",
         )
         return [feature]
 
 
 class _SoulTether(UndeadPower):
     def __init__(self):
-        super().__init__(name="Soul Tether", source="SRD5.1 Lich")
+        super().__init__(name="Soul Tether", source="SRD5.1 Lich", require_cr=6)
 
     def generate_features(self, stats: BaseStatblock) -> List[Feature]:
         dc = stats.difficulty_class
@@ -148,7 +163,7 @@ class _SoulTether(UndeadPower):
 
 class _AntithesisOfLife(UndeadPower):
     def __init__(self):
-        super().__init__(name="Antithesis of Life", source="Foe Foundry")
+        super().__init__(name="Antithesis of Life", source="Foe Foundry", require_cr=4)
 
     def generate_features(self, stats: BaseStatblock) -> List[Feature]:
         dc = stats.difficulty_class_easy

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import math
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Set
 
 from ..ac import ArmorClassTemplate
-from ..attributes import Attributes
+from ..attributes import Attributes, Skills
 from ..creature_types import CreatureType
 from ..damage import Attack, AttackType, Condition, Damage, DamageType
 from ..die import Die, DieFormula
@@ -32,6 +31,7 @@ class BaseStatblock:
     attributes: Attributes
     attack: Attack
     multiattack: int = 1
+    multiattack_benchmark: int = 1
     primary_damage_type: DamageType = DamageType.Bludgeoning
     secondary_damage_type: DamageType | None = None
     difficulty_class_modifier: int = 0
@@ -41,7 +41,7 @@ class BaseStatblock:
     languages: List[str] = field(default_factory=list)
     senses: Senses = field(default_factory=Senses)
     role: MonsterRole = MonsterRole.Default
-    attack_type: AttackType = AttackType.MeleeWeapon
+    damage_vulnerabilities: Set[DamageType] = field(default_factory=set)
     damage_resistances: Set[DamageType] = field(default_factory=set)
     damage_immunities: Set[DamageType] = field(default_factory=set)
     condition_immunities: Set[Condition] = field(default_factory=set)
@@ -57,6 +57,12 @@ class BaseStatblock:
     creature_class: str | None = None
     damage_modifier: float = 1.0
     base_attack_damage: float
+    additional_roles: list[MonsterRole] = field(default_factory=list)
+    has_unique_movement_manipulation: bool = False
+    is_legendary: bool = False
+    has_lair: bool = False
+    legendary_actions: int = 0
+    legendary_resistances: int = 0
 
     def __post_init__(self):
         mod = (
@@ -73,8 +79,6 @@ class BaseStatblock:
 
         self.xp = xp_by_cr(self.cr)
 
-        self.attack = self.attack.with_attack_type(self.attack_type, self.primary_damage_type)
-
     @property
     def key(self) -> str:
         return self.name.lower().replace(" ", "_")
@@ -84,16 +88,25 @@ class BaseStatblock:
         return self.attributes.primary_attribute
 
     @property
+    def attack_types(self) -> Set[AttackType]:
+        return {
+            self.attack.attack_type,
+            *(a.attack_type for a in self.additional_attacks),
+        }
+
+    @property
     def selfref(self) -> str:
-        if self.creature_subtype is not None:
-            return f"the {self.creature_subtype}"
+        if self.creature_class is not None:
+            return f"the {self.creature_class.lower()}"
+        elif self.creature_subtype is not None:
+            return f"the {self.creature_subtype.lower()}"
         else:
             return f"the {self.creature_type.value.lower()}"
 
     @property
     def roleref(self) -> str:
         if self.creature_class is not None:
-            return f"the {self.creature_class}"
+            return f"the {self.creature_class.lower()}"
         else:
             return f"the {self.role.value.lower()}"
 
@@ -112,6 +125,14 @@ class BaseStatblock:
 
         return spellcasting
 
+    @property
+    def dpr(self) -> float:
+        return (
+            self.damage_modifier
+            * self.base_attack_damage
+            * (self.multiattack + 0.66 * self.legendary_actions)
+        )
+
     def __copy_args__(self) -> dict:
         args: dict = dict(
             name=self.name,
@@ -125,6 +146,7 @@ class BaseStatblock:
             attributes=deepcopy(self.attributes),
             attack=deepcopy(self.attack),
             multiattack=self.multiattack,
+            multiattack_benchmark=self.multiattack_benchmark,
             primary_damage_type=self.primary_damage_type,
             secondary_damage_type=self.secondary_damage_type,
             difficulty_class_modifier=self.difficulty_class_modifier,
@@ -134,7 +156,7 @@ class BaseStatblock:
             languages=deepcopy(self.languages),
             senses=deepcopy(self.senses),
             role=self.role,
-            attack_type=self.attack_type,
+            damage_vulnerabilities=deepcopy(self.damage_vulnerabilities),
             damage_resistances=deepcopy(self.damage_resistances),
             damage_immunities=deepcopy(self.damage_immunities),
             condition_immunities=deepcopy(self.condition_immunities),
@@ -146,6 +168,11 @@ class BaseStatblock:
             creature_subtype=self.creature_subtype,
             damage_modifier=self.damage_modifier,
             base_attack_damage=self.base_attack_damage,
+            additional_roles=self.additional_roles.copy(),
+            has_unique_movement_manipulation=self.has_unique_movement_manipulation,
+            legendary_actions=self.legendary_actions,
+            legendary_resistances=self.legendary_resistances,
+            has_lair=self.has_lair,
         )
         return args
 
@@ -160,7 +187,9 @@ class BaseStatblock:
         # resolve hp
         if dials.hp_multiplier != 1:
             args.update(
-                hp=scale_hp_formula(self.hp, target=self.hp.average * dials.hp_multiplier)
+                hp=scale_hp_formula(
+                    self.hp, target=self.hp.average * dials.hp_multiplier
+                )
             )
 
         # resolve ac
@@ -188,7 +217,8 @@ class BaseStatblock:
             args.update(attributes=new_attributes)
 
         if dials.attack_damage_multiplier != 1.0:
-            args.update(damage_modifier=dials.attack_damage_multiplier)
+            existing = self.damage_modifier
+            args.update(damage_modifier=existing * dials.attack_damage_multiplier)
 
         # resolve difficulty class
         if dials.difficulty_class_modifier:
@@ -217,7 +247,7 @@ class BaseStatblock:
 
         for stat, val in stats.items():
             if isinstance(val, int):
-                new_vals[stat] = val
+                new_vals[stat] = self.attributes.stat(stat) + val
             elif callable(val):
                 is_primary = getattr(val, "is_primary", False)
                 if is_primary:
@@ -250,7 +280,9 @@ class BaseStatblock:
         new_ac_boost = self.ac_boost + ac_modifier
         return self.copy(ac_templates=new_templates, ac_boost=new_ac_boost)
 
-    def remove_ac_templates(self, ac_templates: List[ArmorClassTemplate]) -> BaseStatblock:
+    def remove_ac_templates(
+        self, ac_templates: List[ArmorClassTemplate]
+    ) -> BaseStatblock:
         new_templates = [ac for ac in self.ac_templates if ac not in ac_templates]
         return self.copy(ac_templates=new_templates)
 
@@ -258,6 +290,7 @@ class BaseStatblock:
         self,
         resistances: Set[DamageType] | None = None,
         immunities: Set[DamageType] | None = None,
+        vulnerabilities: Set[DamageType] | None = None,
         conditions: Set[Condition] | None = None,
         nonmagical_resistance: bool | None = None,
         nonmagical_immunity: bool | None = None,
@@ -265,10 +298,14 @@ class BaseStatblock:
     ) -> BaseStatblock:
         new_resistances = self.damage_resistances.copy()
         new_immunities = self.damage_immunities.copy()
+        new_vulnerabilities = self.damage_vulnerabilities.copy()
 
         if resistances is not None:
             for damage in resistances:
-                if damage in new_resistances and upgrade_resistance_to_immunity_if_present:
+                if (
+                    damage in new_resistances
+                    and upgrade_resistance_to_immunity_if_present
+                ):
                     new_resistances.remove(damage)
                     new_immunities.add(damage)
                 else:
@@ -279,6 +316,10 @@ class BaseStatblock:
                 new_immunities.add(damage)
                 if damage in new_resistances:
                     new_resistances.remove(damage)
+
+        if vulnerabilities is not None:
+            for damage in vulnerabilities:
+                new_vulnerabilities.add(damage)
 
         new_nonmagical_immunity = nonmagical_immunity or self.nonmagical_immunity
         new_nonmagical_resistance = nonmagical_resistance or self.nonmagical_resistance
@@ -298,15 +339,25 @@ class BaseStatblock:
         return self.copy(
             damage_resistances=new_resistances,
             damage_immunities=new_immunities,
+            damage_vulnerabilities=new_vulnerabilities,
             condition_immunities=new_conditions,
             nonmagical_immunity=new_nonmagical_immunity,
             nonmagical_resistance=new_nonmagical_resistance,
         )
 
+    def grant_proficiency_or_expertise(self, *skills: Skills) -> BaseStatblock:
+        attributes = self.attributes.grant_proficiency_or_expertise(*skills)
+        return self.copy(attributes=attributes)
+
+    def grant_save_proficiency(self, *saves: Stats) -> BaseStatblock:
+        attributes = self.attributes.grant_save_proficiency(*saves)
+        return self.copy(attributes=attributes)
+
     def add_attack(
         self,
         *,
         name: str,
+        display_name: str | None = None,
         scalar: float,
         attack_type: AttackType | None = None,
         damage_type: DamageType | None = None,
@@ -322,7 +373,7 @@ class BaseStatblock:
         )
         damage = Damage(dmg_formula, damage_type or self.primary_damage_type)
 
-        copy_args: dict = dict(name=name, damage=damage)
+        copy_args: dict = dict(name=name, damage=damage, display_name=display_name)
         if attack_type:
             copy_args.update(attack_type=attack_type)
         copy_args.update(attack_args)
@@ -368,6 +419,54 @@ class BaseStatblock:
 
         scaled_target = self.attack.average_damage * target * adjustment
         return DieFormula.target_value(target=scaled_target, **args)
+
+    def with_roles(
+        self,
+        primary_role: MonsterRole,
+        additional_roles: list[MonsterRole] | None = None,
+    ) -> BaseStatblock:
+        if additional_roles is None:
+            additional_roles = []
+
+        new_additional_roles = set(
+            self.additional_roles.copy() + additional_roles + list(self.role)
+        )
+        return self.copy(role=primary_role, additional_roles=list(new_additional_roles))
+
+    def as_legendary(
+        self, *, actions: int = 3, resistances: int = 3, has_lair: bool = False
+    ) -> BaseStatblock:
+        return self.copy(
+            is_legendary=True,
+            legendary_actions=actions,
+            legendary_resistances=resistances,
+            has_lair=has_lair,
+        )
+
+    def with_reduced_attacks(self, reduce_by: int) -> BaseStatblock:
+        if reduce_by <= 0:
+            raise ValueError("reduce_by must be greater than 0")
+        if reduce_by >= 3:
+            raise ValueError("reduce_by must be less than 3")
+
+        if self.multiattack == 1:
+            return self.copy()
+        elif self.multiattack - reduce_by <= 0:
+            return self.with_reduced_attacks(1)
+
+        # monster already had attacks reduced
+        if self.multiattack <= self.multiattack_benchmark - reduce_by:
+            return self.copy()
+
+        new_attacks = self.multiattack_benchmark - reduce_by
+        new_target_multiplier = self.multiattack * self.damage_modifier / new_attacks
+        attack_modifier = new_attacks - self.multiattack
+        return self.apply_monster_dials(
+            MonsterDials(
+                attack_damage_multiplier=new_target_multiplier,
+                multiattack_modifier=attack_modifier,
+            )
+        )
 
 
 def _spell_list(all_spells: List[StatblockSpell], uses: int | None) -> str | None:

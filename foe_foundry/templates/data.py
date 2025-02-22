@@ -10,7 +10,6 @@ from ..benchmarks import Benchmark
 from ..damage import Attack, DamageType
 from ..features import ActionType, Feature
 from ..skills import Skills
-from ..spells import StatblockSpell
 from ..statblocks import Statblock
 from .utilities import fix_punctuation
 
@@ -49,6 +48,7 @@ class MonsterTemplateData:
     reactions: List[Feature]
     attacks: List[Attack]
     attack_modifiers: List[Feature]
+    legendary_actions: List[Feature]
 
     multiattack: str
     attack: Attack
@@ -83,7 +83,9 @@ class MonsterTemplateData:
         stats: Statblock, benchmarks: List[Benchmark] | None = None
     ) -> MonsterTemplateData:
         hp = f"{stats.hp.static} ({stats.hp.dice_formula()})"
-        languages = ", ".join(l for l in stats.languages) if stats.languages is not None else ""
+        languages = (
+            ", ".join(l for l in stats.languages) if stats.languages is not None else ""
+        )
 
         creature_type_additions = []
         if stats.creature_subtype:
@@ -106,7 +108,13 @@ class MonsterTemplateData:
         )
         cr = f"{cr_fraction} ({stats.xp:,.0f} XP)"
 
-        passives, actions, bonus_actions, reactions = [], [], [], []
+        passives, actions, bonus_actions, reactions, legendary_actions = (
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
         for feature in stats.features:
             if feature.hidden:
                 continue
@@ -118,6 +126,8 @@ class MonsterTemplateData:
                 bonus_actions.append(feature)
             elif feature.action == ActionType.Reaction:
                 reactions.append(feature)
+            elif feature.action == ActionType.Legendary:
+                legendary_actions.append(feature)
 
         spellcasting = stats.spellcasting_md
 
@@ -129,7 +139,16 @@ class MonsterTemplateData:
         if stats.attack.name == "Attack":
             attack_name = "attacks"
         else:
-            attack_name = f"{stats.attack.name} attacks"
+            primary_attacks = [stats.attack]
+            primary_attacks += [
+                a for a in stats.additional_attacks if a.is_equivalent_to_primary_attack
+            ]
+            if len(primary_attacks) == 1:
+                attack_name = f"{stats.attack.display_name} attacks"
+            else:
+                attack_name = (
+                    " or ".join(a.display_name for a in primary_attacks) + " attacks"
+                )
 
         if stats.multiattack <= 1:
             multiattack = ""
@@ -139,16 +158,18 @@ class MonsterTemplateData:
             replacements = []
             replacements += [
                 (
-                    a.name,
+                    a.display_name,
                     max(1, a.replaces_multiattack),
                 )  # assume all additional attacks can be swapped out as part of multiattack
                 for a in stats.additional_attacks
                 if a.replaces_multiattack < stats.multiattack
+                and not a.is_equivalent_to_primary_attack
             ]
             replacements += [
                 (f.name, f.replaces_multiattack)
                 for f in stats.features
-                if f.replaces_multiattack > 0 and f.replaces_multiattack < stats.multiattack
+                if f.replaces_multiattack > 0
+                and f.replaces_multiattack < stats.multiattack
             ]
 
             # spellcasting can replace two multiattacks for creatures with 3+ attacks
@@ -184,9 +205,13 @@ class MonsterTemplateData:
             damage_resistances=_damage_list(
                 stats.damage_resistances, stats.nonmagical_resistance
             ),
-            damage_immunities=_damage_list(stats.damage_immunities, stats.nonmagical_immunity),
+            damage_immunities=_damage_list(
+                stats.damage_immunities, stats.nonmagical_immunity
+            ),
             condition_immunities=", ".join(c.name for c in stats.condition_immunities),
-            senses=stats.senses.describe(stats.attributes.passive_skill(Skills.Perception)),
+            senses=stats.senses.describe(
+                stats.attributes.passive_skill(Skills.Perception)
+            ),
             languages=languages,
             challenge=cr,
             proficiency_bonus=f"+{stats.attributes.proficiency}",
@@ -194,6 +219,7 @@ class MonsterTemplateData:
             actions=actions,
             bonus_actions=bonus_actions,
             reactions=reactions,
+            legendary_actions=legendary_actions,
             attack_modifiers=attack_modifiers,
             multiattack=multiattack,
             attack=stats.attack,

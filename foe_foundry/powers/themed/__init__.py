@@ -28,7 +28,9 @@ from . import (
     poison,
     psychic,
     reckless,
+    skeletal,
     sneaky,
+    species,
     spellcaster,
     storm,
     technique,
@@ -38,6 +40,7 @@ from . import (
     trap,
     tricky,
     warrior,
+    zombie,
 )
 
 ThemedPowers: List[Power] = (
@@ -67,7 +70,10 @@ ThemedPowers: List[Power] = (
     + poison.PoisonPowers
     + psychic.PsychicPowers
     + reckless.RecklessPowers
+    + skeletal.SkeletalPowers
     + sneaky.SneakyPowers
+    + species.DwarfPowers
+    + species.OrcPowers
     + spellcaster.SpellcasterPowers
     + storm.StormPowers
     + technique.TechniquePowers
@@ -77,4 +83,5 @@ ThemedPowers: List[Power] = (
     + trap.TrapPowers
     + tricky.TrickyPowers
     + warrior.WarriorPowers
+    + zombie.ZombiePowers
 )
